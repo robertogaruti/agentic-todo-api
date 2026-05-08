@@ -1,108 +1,83 @@
-import { Router, Request, Response } from "express";
-import { randomUUID } from "crypto";
-import type { Todo } from "../types/todo";
+import { Router, type Request, type Response } from "express";
 import {
   createTodoSchema,
+  listTodosQuerySchema,
   updateTodoSchema,
   todoIdParamSchema,
 } from "../schemas/todo";
+import { requireAuthenticatedUserId } from "../middleware/auth";
+import { findCategoryRecordById } from "../repositories/categories";
+import {
+  createTodo,
+  findTodoRecordById,
+  listTodosByUser,
+  updateTodo,
+} from "../repositories/todos";
 
 const router = Router();
 
-// In-memory store (demo only)
-const todos: Map<string, Todo> = new Map([
-  [
-    "550e8400-e29b-41d4-a716-446655440000",
-    {
-      id: "550e8400-e29b-41d4-a716-446655440000",
-      title: "Learn TypeScript",
-      description: "Study TypeScript strict mode and advanced types",
-      completed: true,
-      createdAt: new Date("2026-05-01T10:00:00Z").toISOString(),
-      updatedAt: new Date("2026-05-03T14:00:00Z").toISOString(),
-    },
-  ],
-  [
-    "550e8400-e29b-41d4-a716-446655440001",
-    {
-      id: "550e8400-e29b-41d4-a716-446655440001",
-      title: "Build a REST API",
-      description: "Create a Todo API with Express and Zod validation",
-      completed: false,
-      createdAt: new Date("2026-05-05T09:00:00Z").toISOString(),
-      updatedAt: new Date("2026-05-05T09:00:00Z").toISOString(),
-    },
-  ],
-]);
-
-/**
- * GET /api/todos
- * Returns all todos. Supports optional ?completed=true|false filter.
- */
 router.get("/", (req: Request, res: Response) => {
-  const { completed } = req.query;
+  const userId = requireAuthenticatedUserId(req);
+  const parsedQuery = listTodosQuerySchema.safeParse(req.query);
 
-  let result = Array.from(todos.values());
-
-  if (completed !== undefined) {
-    const filterCompleted = completed === "true";
-    result = result.filter((t) => t.completed === filterCompleted);
+  if (!parsedQuery.success) {
+    res.status(400).json({
+      error: "Validation failed",
+      details: parsedQuery.error.issues,
+    });
+    return;
   }
 
-  // Sort by creation date descending
-  result.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  const result = listTodosByUser(userId, parsedQuery.data);
 
   res.json({ data: result, total: result.length });
 });
 
-/**
- * POST /api/todos
- * Creates a new todo. Body: { title, description? }
- */
 router.post("/", (req: Request, res: Response) => {
+  const userId = requireAuthenticatedUserId(req);
   const parsed = createTodoSchema.safeParse(req.body);
 
   if (!parsed.success) {
     res
       .status(400)
-      .json({ error: "Validation failed", details: parsed.error.flatten() });
+      .json({ error: "Validation failed", details: parsed.error.issues });
     return;
   }
 
-  const now = new Date().toISOString();
-  const todo: Todo = {
-    id: randomUUID(),
+  if (
+    parsed.data.categoryId !== undefined &&
+    !findCategoryRecordById(parsed.data.categoryId, userId)
+  ) {
+    res.status(404).json({
+      error: `Category with id "${parsed.data.categoryId}" not found`,
+    });
+    return;
+  }
+
+  const todo = createTodo({
+    userId,
     title: parsed.data.title,
     description: parsed.data.description,
-    completed: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  todos.set(todo.id, todo);
+    priority: parsed.data.priority,
+    categoryId: parsed.data.categoryId ?? null,
+  });
 
   res.status(201).json({ data: todo });
 });
 
-/**
- * PATCH /api/todos/:id
- * Updates a todo's fields or toggles its completed status.
- * Body: { title?, description?, completed? }
- */
 router.patch("/:id", (req: Request, res: Response) => {
+  const userId = requireAuthenticatedUserId(req);
   const paramParsed = todoIdParamSchema.safeParse(req.params);
 
   if (!paramParsed.success) {
     res
       .status(400)
-      .json({ error: "Invalid ID", details: paramParsed.error.flatten() });
+      .json({ error: "Invalid ID", details: paramParsed.error.issues });
     return;
   }
 
   const { id } = paramParsed.data;
-  const todo = todos.get(id);
+  const todo = findTodoRecordById(id, userId);
 
   if (!todo) {
     res.status(404).json({ error: `Todo with id "${id}" not found` });
@@ -112,22 +87,30 @@ router.patch("/:id", (req: Request, res: Response) => {
   const bodyParsed = updateTodoSchema.safeParse(req.body);
 
   if (!bodyParsed.success) {
-    res
-      .status(400)
-      .json({
-        error: "Validation failed",
-        details: bodyParsed.error.flatten(),
-      });
+    res.status(400).json({
+      error: "Validation failed",
+      details: bodyParsed.error.issues,
+    });
     return;
   }
 
-  const updated: Todo = {
-    ...todo,
-    ...bodyParsed.data,
-    updatedAt: new Date().toISOString(),
-  };
+  if (
+    bodyParsed.data.categoryId !== undefined &&
+    bodyParsed.data.categoryId !== null &&
+    !findCategoryRecordById(bodyParsed.data.categoryId, userId)
+  ) {
+    res.status(404).json({
+      error: `Category with id "${bodyParsed.data.categoryId}" not found`,
+    });
+    return;
+  }
 
-  todos.set(id, updated);
+  const updated = updateTodo(id, userId, bodyParsed.data);
+
+  if (!updated) {
+    res.status(404).json({ error: `Todo with id "${id}" not found` });
+    return;
+  }
 
   res.json({ data: updated });
 });

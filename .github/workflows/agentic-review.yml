@@ -1,0 +1,15 @@
+name: Agentic Security Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Security Auditor Agent
+        run: |
+          # Qui puoi usare GitHub Copilot CLI o un action personalizzata
+          echo "Invoking @security-auditor agent..."
+          # Esempio con gh + copilot (se supportato)
