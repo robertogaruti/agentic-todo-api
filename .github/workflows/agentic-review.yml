@@ -1,5 +1,22 @@
 name: Agentic Security Review
 on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "Choose which agent to invoke"
+        required: true
+        default: "security-auditor"
+        type: choice
+        options:
+          - security-auditor
+          - test-agent
+          - api-designer
+          - backend-dev
+      branch:
+        description: "Target branch for review"
+        required: false
+        default: "main"
+        type: string
   pull_request:
     types: [opened, synchronize]
 jobs:
@@ -7,9 +24,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
       
-      - name: Run Security Auditor Agent
+      - name: Print Agent Configuration
         run: |
-          # Qui puoi usare GitHub Copilot CLI o un action personalizzata
-          echo "Invoking @security-auditor agent..."
+          echo "Running Agentic Review"
+          echo "Agent: ${{ github.event.inputs.agent || 'security-auditor' }}"
+          echo "Branch: ${{ github.event.inputs.branch || 'main' }}"
+      
+      - name: Run Selected Agent
+        run: |
+          # Invoke the chosen agent via GitHub Copilot CLI or custom action
+          AGENT="${{ github.event.inputs.agent || 'security-auditor' }}"
+          echo "Invoking @${AGENT} agent..."
           # Esempio con gh + copilot (se supportato)
+          # gh copilot agent @${AGENT} -- "Review the current codebase"
